@@ -10,6 +10,8 @@ import { cn } from "@/lib/utils";
 
 export interface RepoHeaderProps {
   name: string;
+  displayName: string;
+  visibility: "public" | "private";
   description: string;
   defaultBranch: string;
   branches: string[];
@@ -49,16 +51,29 @@ export function RepoHeader(p: RepoHeaderProps) {
           </Link>
           <span className="text-[#6e7681] font-normal">/</span>
           <Link href={`/${p.name}`} className="text-[#4493f8] hover:underline break-all">
-            {p.name}
+            {p.displayName || p.name}
           </Link>
-          <span className="text-xs text-[#8b949e] border border-[#30363d] rounded-full px-2 py-0.5 font-normal">
-            Public
-          </span>
+          {p.visibility === "private" ? (
+            <span className="text-xs text-[#d29922] border border-[#d29922]/50 bg-[#d29922]/10 rounded-full px-2 py-0.5 font-normal inline-flex items-center gap-1">
+              <Lock className="size-3" aria-hidden /> Private
+            </span>
+          ) : (
+            <span className="text-xs text-[#8b949e] border border-[#30363d] rounded-full px-2 py-0.5 font-normal">
+              Public
+            </span>
+          )}
         </h1>
       </div>
 
       {p.description ? (
         <p className="text-sm text-[#8b949e] -mt-1">{p.description}</p>
+      ) : null}
+
+      {p.visibility === "private" ? (
+        <p className="text-xs text-[#d29922] border border-[#d29922]/40 bg-[#d29922]/10 rounded-md px-3 py-2">
+          This repository is private and unlisted. Anyone with this secret link has full
+          read &amp; write access (web, git clone, pull and push) — share it carefully.
+        </p>
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3 border-b border-[#30363d] pb-3">

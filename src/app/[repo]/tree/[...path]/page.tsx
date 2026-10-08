@@ -62,6 +62,8 @@ export default async function TreePage({
         <>
           <RepoHeader
             name={meta.name}
+            displayName={meta.displayName}
+            visibility={meta.visibility}
             description={meta.description}
             defaultBranch={meta.defaultBranch}
             branches={meta.branches}
@@ -69,7 +71,7 @@ export default async function TreePage({
             currentRef={refName}
             activeTab="code"
           />
-          <Breadcrumb repo={repo} refName={refName} segments={path} lastIsBlob={false} />
+          <Breadcrumb repo={repo} label={meta.displayName} refName={refName} segments={path} lastIsBlob={false} />
         </>
       }
     >

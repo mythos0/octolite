@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createRepo, listRepos } from "@/lib/git";
+import { createRepo, listRepos, type Visibility } from "@/lib/git";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -10,7 +10,12 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  let body: { name?: string; description?: string; initReadme?: boolean };
+  let body: {
+    name?: string;
+    description?: string;
+    initReadme?: boolean;
+    visibility?: string;
+  };
   try {
     body = await req.json();
   } catch {
@@ -19,9 +24,13 @@ export async function POST(req: NextRequest) {
   const name = (body.name ?? "").trim();
   const description = (body.description ?? "").trim().slice(0, 300);
   const initReadme = Boolean(body.initReadme);
+  const visibility: Visibility = body.visibility === "private" ? "private" : "public";
   if (!name) return NextResponse.json({ error: "Repository name is required." }, { status: 400 });
 
-  const res = await createRepo(name, description, initReadme);
+  const res = await createRepo(name, description, initReadme, visibility);
   if (!res.ok) return NextResponse.json({ error: res.error }, { status: 400 });
-  return NextResponse.json({ ok: true, name }, { status: 201 });
+  return NextResponse.json(
+    { ok: true, name: res.name, displayName: res.displayName, visibility: res.visibility },
+    { status: 201 }
+  );
 }

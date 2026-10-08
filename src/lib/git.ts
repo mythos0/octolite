@@ -4,6 +4,7 @@
  * used by both the web UI and the Git Smart HTTP backend.
  */
 import { spawn } from "child_process";
+import { randomBytes } from "crypto";
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
@@ -23,7 +24,15 @@ export const RESERVED_NAMES = [
   "examples",
 ];
 
-const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,99}$/;
+const NAME_RE = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,59}$/;
+
+export type Visibility = "public" | "private";
+
+interface OctoMetaFile {
+  displayName: string;
+  visibility: Visibility;
+  secret?: string;
+}
 
 export function isValidRepoName(name: string): boolean {
   if (!NAME_RE.test(name)) return false;
@@ -105,7 +114,11 @@ export interface RepoSummary {
 }
 
 export interface RepoMeta {
+  /** Stored slug — includes the secret suffix for private repos. Used in all URLs. */
   name: string;
+  /** Human-friendly name (secret stripped for private repos). */
+  displayName: string;
+  visibility: Visibility;
   description: string;
   createdAt: string;
   isEmpty: boolean;
@@ -170,6 +183,15 @@ async function gitCommitCount(dir: string, ref: string): Promise<number> {
   return parseInt(stdout.toString().trim(), 10) || 0;
 }
 
+async function readOctoMeta(dir: string): Promise<OctoMetaFile | null> {
+  try {
+    const raw = await fsp.readFile(path.join(dir, "octolite.json"), "utf8");
+    return JSON.parse(raw) as OctoMetaFile;
+  } catch {
+    return null;
+  }
+}
+
 async function readDescription(dir: string): Promise<string> {
   try {
     const raw = await fsp.readFile(path.join(dir, "description"), "utf8");
@@ -188,14 +210,17 @@ export async function getRepoMeta(name: string): Promise<RepoMeta | null> {
   const defaultBranch = await gitDefaultBranch(dir, branches);
   const isEmpty = branches.length === 0;
   const ref = defaultBranch || "HEAD";
-  const [description, createdAt, lastCommit, commitCount] = await Promise.all([
+  const [description, createdAt, lastCommit, commitCount, octo] = await Promise.all([
     readDescription(dir),
     repoCreatedAt(dir),
     isEmpty ? null : gitLastCommit(dir, ref),
     isEmpty ? 0 : gitCommitCount(dir, ref),
+    readOctoMeta(dir),
   ]);
   return {
     name,
+    displayName: octo?.displayName ?? name,
+    visibility: octo?.visibility ?? "public",
     description,
     createdAt,
     isEmpty,
@@ -215,27 +240,47 @@ async function repoCreatedAt(dir: string): Promise<string> {
   }
 }
 
+/** Public repo listing — private repos are never exposed here. */
 export async function listRepos(): Promise<RepoMeta[]> {
   const names = await listRepoNames();
   const metas = await Promise.all(names.map((n) => getRepoMeta(n)));
-  return metas.filter((m): m is RepoMeta => m !== null);
+  return metas.filter((m): m is RepoMeta => m !== null && m.visibility === "public");
+}
+
+export interface CreateRepoResult {
+  ok: boolean;
+  error?: string;
+  /** Stored slug (includes secret suffix for private repos) — used in URLs. */
+  name?: string;
+  displayName?: string;
+  visibility?: Visibility;
+  secret?: string;
 }
 
 export async function createRepo(
   name: string,
   description = "",
-  initReadme = false
-): Promise<{ ok: boolean; error?: string }> {
+  initReadme = false,
+  visibility: Visibility = "public"
+): Promise<CreateRepoResult> {
   if (!isValidRepoName(name)) {
     return {
       ok: false,
       error:
-        "Invalid repository name. Use letters, digits, '.', '_' or '-' (must start with a letter/digit).",
+        "Invalid repository name. Use letters, digits, '.', '_' or '-' (must start with a letter/digit, max 60 chars).",
     };
   }
-  if (repoExists(name)) return { ok: false, error: `Repository "${name}" already exists.` };
+  // Private repos live at <name>-<secret> — knowing the link is the only credential.
+  const secret = visibility === "private" ? randomBytes(8).toString("hex") : undefined;
+  const storedName = secret ? `${name}-${secret}` : name;
+  if (!isValidRepoName(storedName)) {
+    return { ok: false, error: "Invalid repository name." };
+  }
+  if (repoExists(storedName)) {
+    return { ok: false, error: `Repository "${name}" already exists.` };
+  }
   await fsp.mkdir(GIT_ROOT, { recursive: true });
-  const dir = repoDir(name);
+  const dir = repoDir(storedName);
   const init = await runGit(["init", "--bare", "--initial-branch=main", dir]);
   if (init.code !== 0) return { ok: false, error: init.stderr || "git init failed" };
   await runGit(["-C", dir, "config", "http.receivepack", "true"]);
@@ -244,6 +289,11 @@ export async function createRepo(
     description || `${name} — hosted on OctoLite`,
     "utf8"
   );
+  const octo: OctoMetaFile =
+    visibility === "private"
+      ? { displayName: name, visibility, secret }
+      : { displayName: name, visibility };
+  await fsp.writeFile(path.join(dir, "octolite.json"), JSON.stringify(octo), "utf8");
   if (initReadme) {
     const readme = [
       `# ${name}`,
@@ -282,10 +332,16 @@ export async function createRepo(
       commit.stdout.toString().trim(),
     ]);
   }
-  return { ok: true };
+  return {
+    ok: true,
+    name: storedName,
+    displayName: name,
+    visibility,
+    secret,
+  };
 }
 
-/** Create an empty bare repo for push-to-create (no README). */
+/** Create an empty bare repo for push-to-create (always public). */
 export async function ensureRepoForPush(name: string): Promise<boolean> {
   if (!isValidRepoName(name)) return false;
   if (repoExists(name)) return true;

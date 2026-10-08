@@ -48,6 +48,8 @@ export default async function CommitsPage({
       header={
         <RepoHeader
           name={meta.name}
+          displayName={meta.displayName}
+          visibility={meta.visibility}
           description={meta.description}
           defaultBranch={meta.defaultBranch}
           branches={meta.branches}

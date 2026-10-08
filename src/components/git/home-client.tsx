@@ -8,28 +8,18 @@ import {
   GitBranch,
   Search,
   Terminal,
-  Trash2,
   UploadCloud,
   CloudDownload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog";
 import { CreateRepoDialog } from "./create-repo-dialog";
 import { timeAgo } from "@/lib/time";
 
 interface RepoItem {
   name: string;
+  displayName: string;
+  visibility: "public" | "private";
   description: string;
   defaultBranch: string;
   branches: string[];
@@ -52,18 +42,20 @@ export function HomeClient() {
   const [repos, setRepos] = useState<RepoItem[] | null>(null);
   const [query, setQuery] = useState("");
   const [origin, setOrigin] = useState("");
-  const [deleting, setDeleting] = useState<string | null>(null);
 
   useEffect(() => {
-    setOrigin(window.location.origin);
     let alive = true;
     fetch("/api/repos")
       .then((r) => r.json())
       .then((d) => {
-        if (alive) setRepos(d.repos ?? []);
+        if (!alive) return;
+        setOrigin(window.location.origin);
+        setRepos(d.repos ?? []);
       })
       .catch(() => {
-        if (alive) setRepos([]);
+        if (!alive) return;
+        setOrigin(window.location.origin);
+        setRepos([]);
       });
     return () => {
       alive = false;
@@ -75,19 +67,12 @@ export function HomeClient() {
     const q = query.trim().toLowerCase();
     if (!q) return repos;
     return repos.filter(
-      (r) => r.name.toLowerCase().includes(q) || r.description.toLowerCase().includes(q)
+      (r) =>
+        r.name.toLowerCase().includes(q) ||
+        r.displayName.toLowerCase().includes(q) ||
+        r.description.toLowerCase().includes(q)
     );
   }, [repos, query]);
-
-  async function onDelete(name: string) {
-    setDeleting(name);
-    try {
-      await fetch(`/api/repos/${name}`, { method: "DELETE" });
-      setRepos((prev) => prev?.filter((r) => r.name !== name) ?? null);
-    } finally {
-      setDeleting(null);
-    }
-  }
 
   return (
     <div className="flex flex-col gap-8">
@@ -97,7 +82,7 @@ export function HomeClient() {
           <h1 className="text-2xl font-semibold">Repositories</h1>
           <p className="text-sm text-[#8b949e] mt-1">
             Minimal GitHub-style hosting — no login, no keys. Clone, pull and push with
-            just the link.
+            just the link. Private repos stay hidden unless you have their secret link.
           </p>
         </div>
         <CreateRepoDialog />
@@ -121,7 +106,7 @@ export function HomeClient() {
           <div className="flex items-center gap-2 text-sm font-medium text-[#e6edf3]">
             <Terminal className="size-4 text-[#3fb950]" aria-hidden /> 3. Push-to-create
           </div>
-          <CodeLine>{`# repo is created automatically:\ngit push ${origin || "<this-site>"}/brand-new.git main`}</CodeLine>
+          <CodeLine>{`# repo is created automatically (public):\ngit push ${origin || "<this-site>"}/brand-new.git main`}</CodeLine>
         </div>
       </section>
 
@@ -144,11 +129,12 @@ export function HomeClient() {
           <div className="rounded-lg border border-dashed border-[#30363d] py-16 text-center">
             <BookMarked className="size-10 mx-auto text-[#6e7681]" aria-hidden />
             <p className="mt-3 text-[#8b949e] text-sm">
-              {query ? "No repositories match your search." : "No repositories yet — create one or just push to it."}
+              {query ? "No repositories match your search." : "No public repositories yet — create one or just push to it."}
             </p>
             {!query ? (
               <p className="mt-2 text-xs text-[#6e7681]">
-                Tip: the push-to-create command above makes a repo instantly.
+                Tip: the push-to-create command above makes a repo instantly. Private repos are
+                never listed here.
               </p>
             ) : null}
           </div>
@@ -163,7 +149,7 @@ export function HomeClient() {
                       href={`/${r.name}`}
                       className="font-semibold text-[#4493f8] hover:underline break-all"
                     >
-                      {r.name}
+                      {r.displayName || r.name}
                     </Link>
                     <span className="text-xs text-[#8b949e] border border-[#30363d] rounded-full px-2 py-0.5">
                       Public
@@ -193,42 +179,6 @@ export function HomeClient() {
                   >
                     Commits
                   </Button>
-                  <AlertDialog>
-                    <AlertDialogTrigger asChild>
-                      <Button
-                        variant="outline"
-                        size="icon"
-                        aria-label={`Delete repository ${r.name}`}
-                        className="border-[#30363d] bg-transparent text-[#8b949e] hover:bg-[#f85149]/10 hover:text-[#f85149] hover:border-[#f85149]/50"
-                      >
-                        <Trash2 className="size-4" />
-                      </Button>
-                    </AlertDialogTrigger>
-                    <AlertDialogContent className="bg-[#161b22] border-[#30363d] text-[#e6edf3]">
-                      <AlertDialogHeader>
-                        <AlertDialogTitle>Delete {r.name}?</AlertDialogTitle>
-                        <AlertDialogDescription className="text-[#8b949e]">
-                          This permanently removes the repository and all of its history.
-                          This action cannot be undone.
-                        </AlertDialogDescription>
-                      </AlertDialogHeader>
-                      <AlertDialogFooter>
-                        <AlertDialogCancel className="bg-[#21262d] border-[#30363d] text-[#e6edf3] hover:bg-[#30363d]">
-                          Cancel
-                        </AlertDialogCancel>
-                        <AlertDialogAction
-                          disabled={deleting === r.name}
-                          onClick={(e) => {
-                            e.preventDefault();
-                            onDelete(r.name);
-                          }}
-                          className="bg-[#da3633] hover:bg-[#f85149] text-white"
-                        >
-                          Delete repository
-                        </AlertDialogAction>
-                      </AlertDialogFooter>
-                    </AlertDialogContent>
-                  </AlertDialog>
                 </div>
               </li>
             ))}

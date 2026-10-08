@@ -2,7 +2,7 @@
 
 import { useState, useTransition } from "react";
 import { useRouter } from "next/navigation";
-import { Loader2, Plus } from "lucide-react";
+import { Loader2, Lock, Plus, Globe } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -16,6 +16,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Checkbox } from "@/components/ui/checkbox";
+import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
+import { cn } from "@/lib/utils";
+
+type Visibility = "public" | "private";
 
 export function CreateRepoDialog() {
   const router = useRouter();
@@ -23,6 +27,7 @@ export function CreateRepoDialog() {
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [initReadme, setInitReadme] = useState(true);
+  const [visibility, setVisibility] = useState<Visibility>("public");
   const [error, setError] = useState<string | null>(null);
   const [creating, setCreating] = useState(false);
   const [, startTransition] = useTransition();
@@ -35,7 +40,7 @@ export function CreateRepoDialog() {
       const res = await fetch("/api/repos", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: name.trim(), description, initReadme }),
+        body: JSON.stringify({ name: name.trim(), description, initReadme, visibility }),
       });
       const data = await res.json();
       if (!res.ok) {
@@ -76,6 +81,7 @@ export function CreateRepoDialog() {
               placeholder="my-project"
               autoFocus
               required
+              maxLength={60}
               className="bg-[#0d1117] border-[#30363d] text-[#e6edf3] placeholder:text-[#6e7681]"
             />
             <p className="text-xs text-[#8b949e]">
@@ -92,6 +98,56 @@ export function CreateRepoDialog() {
               className="bg-[#0d1117] border-[#30363d] text-[#e6edf3] placeholder:text-[#6e7681]"
             />
           </div>
+
+          <div className="flex flex-col gap-2">
+            <Label>Visibility</Label>
+            <RadioGroup
+              value={visibility}
+              onValueChange={(v) => setVisibility(v as Visibility)}
+              className="gap-2"
+            >
+              <label
+                className={cn(
+                  "flex items-start gap-3 rounded-md border p-3 cursor-pointer select-none",
+                  visibility === "public"
+                    ? "border-[#238636] bg-[#238636]/10"
+                    : "border-[#30363d] hover:bg-[#0d1117]"
+                )}
+              >
+                <RadioGroupItem value="public" className="mt-0.5 border-[#30363d] text-[#e6edf3]" />
+                <span className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <Globe className="size-3.5 text-[#3fb950]" aria-hidden />
+                    Public
+                  </span>
+                  <span className="text-xs text-[#8b949e]">
+                    Anyone can see, clone and push to this repository. Listed on the home page.
+                  </span>
+                </span>
+              </label>
+              <label
+                className={cn(
+                  "flex items-start gap-3 rounded-md border p-3 cursor-pointer select-none",
+                  visibility === "private"
+                    ? "border-[#d29922] bg-[#d29922]/10"
+                    : "border-[#30363d] hover:bg-[#0d1117]"
+                )}
+              >
+                <RadioGroupItem value="private" className="mt-0.5 border-[#30363d] text-[#e6edf3]" />
+                <span className="flex flex-col gap-0.5">
+                  <span className="flex items-center gap-1.5 text-sm font-medium">
+                    <Lock className="size-3.5 text-[#d29922]" aria-hidden />
+                    Private
+                  </span>
+                  <span className="text-xs text-[#8b949e]">
+                    Unlisted and hidden. Only people who have the secret link can access it
+                    (web, clone, pull and push).
+                  </span>
+                </span>
+              </label>
+            </RadioGroup>
+          </div>
+
           <label className="flex items-center gap-2 text-sm cursor-pointer select-none">
             <Checkbox
               checked={initReadme}
