@@ -9,7 +9,39 @@ import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
 
-export const GIT_ROOT = path.join(process.cwd(), "git-data");
+/**
+ * Resolve the directory that stores bare repositories.
+ *
+ * Resolution order:
+ *   1. $GIT_DATA_DIR env override
+ *   2. <cwd>/git-data — used when it already exists or can be created
+ *      (normal dev + local production, persists across restarts)
+ *   3. /tmp/octolite-git-data — fallback for read-only or relocated-cwd
+ *      deployments (e.g. serverless standalone builds)
+ */
+function isWritableDir(p: string): boolean {
+  try {
+    fs.mkdirSync(p, { recursive: true });
+    fs.accessSync(p, fs.constants.W_OK);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function resolveGitRoot(): string {
+  const fromEnv = process.env.GIT_DATA_DIR?.trim();
+  if (fromEnv && isWritableDir(path.resolve(fromEnv))) return path.resolve(fromEnv);
+
+  const local = path.join(process.cwd(), "git-data");
+  if (fs.existsSync(local)) return local;
+  if (isWritableDir(local)) return local;
+
+  // read-only FS or unwritable cwd — fall back to /tmp (serverless safe)
+  return "/tmp/octolite-git-data";
+}
+
+export const GIT_ROOT = resolveGitRoot();
 
 export const RESERVED_NAMES = [
   "api",
@@ -63,7 +95,14 @@ export function runGit(
     let err = "";
     child.stdout.on("data", (c) => out.push(c as Buffer));
     child.stderr.on("data", (c) => (err += c.toString()));
-    child.on("error", reject);
+    child.on("error", (e) => {
+      // e.g. ENOENT when the runtime image has no git binary — fail cleanly
+      resolve({
+        code: 127,
+        stdout: Buffer.concat(out),
+        stderr: `${err}git spawn failed: ${e.message}`,
+      });
+    });
     child.on("close", (code) =>
       resolve({ code: code ?? 0, stdout: Buffer.concat(out), stderr: err })
     );
@@ -129,8 +168,19 @@ export interface RepoMeta {
 }
 
 export async function listRepoNames(): Promise<string[]> {
-  if (!fs.existsSync(GIT_ROOT)) await fsp.mkdir(GIT_ROOT, { recursive: true });
-  const entries = await fsp.readdir(GIT_ROOT);
+  if (!fs.existsSync(GIT_ROOT)) {
+    try {
+      await fsp.mkdir(GIT_ROOT, { recursive: true });
+    } catch {
+      return [];
+    }
+  }
+  let entries: string[];
+  try {
+    entries = await fsp.readdir(GIT_ROOT);
+  } catch {
+    return [];
+  }
   return entries
     .filter((e) => e.endsWith(".git"))
     .filter((e) => fs.existsSync(path.join(GIT_ROOT, e, "HEAD")))
