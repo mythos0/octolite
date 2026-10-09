@@ -1,13 +1,6 @@
 import { notFound } from "next/navigation";
-import {
-  findReadme,
-  getRepoMeta,
-  isValidRef,
-  listCommits,
-  listTree,
-  pathType,
-  readFileContent,
-} from "@/lib/git";
+import { findReadme, getRepoMeta, listCommits, listTree, pathType, readFileContent } from "@/lib/git";
+import { resolveRefAndPath } from "@/lib/repo-path";
 import { RepoHeader } from "@/components/git/repo-header";
 import { RepoShell } from "@/components/git/repo-shell";
 import { FileTable } from "@/components/git/file-table";
@@ -18,33 +11,36 @@ import { BookOpen } from "lucide-react";
 
 export const dynamic = "force-dynamic";
 
+/**
+ * GitHub-style tree URL: /<repo>/tree/<ref>/<dir…>
+ * The ref is resolved from the leading path segments (longest branch match,
+ * or a commit sha); the rest is the directory path.
+ */
 export default async function TreePage({
   params,
-  searchParams,
 }: {
   params: Promise<{ repo: string; path: string[] }>;
-  searchParams: Promise<{ ref?: string }>;
 }) {
   const { repo, path } = await params;
-  const { ref: refParam } = await searchParams;
   const meta = await getRepoMeta(repo);
   if (!meta) notFound();
 
-  const refName =
-    refParam && meta.branches.includes(refParam) && isValidRef(refParam)
-      ? refParam
-      : meta.defaultBranch;
+  const { ref: refName, segments, dirPath } = resolveRefAndPath(
+    path ?? [],
+    meta.branches,
+    meta.defaultBranch
+  );
 
-  const dirPath = (path ?? []).join("/");
-  if ((path ?? []).length === 0) notFound();
-
-  // If the path points to a blob, redirect to the blob view.
-  const type = await pathType(repo, refName, dirPath);
-  if (type === "blob") {
-    const { redirect } = await import("next/navigation");
-    redirect(`/${repo}/blob/${dirPath}?ref=${encodeURIComponent(refName)}`);
+  // At the ref root the tree renders directly; deeper paths are checked so a
+  // blob URL under /tree redirects to /blob (and unknown paths 404).
+  if (segments.length > 0) {
+    const type = await pathType(repo, refName, dirPath);
+    if (type === "blob") {
+      const { redirect } = await import("next/navigation");
+      redirect(`/${repo}/blob/${[refName, ...segments].map(encodeURIComponent).join("/")}`);
+    }
+    if (type === null) notFound();
   }
-  if (type === null) notFound();
 
   const [entries, tipCommits] = await Promise.all([
     listTree(repo, refName, dirPath),
@@ -71,7 +67,13 @@ export default async function TreePage({
             currentRef={refName}
             activeTab="code"
           />
-          <Breadcrumb repo={repo} label={meta.displayName} refName={refName} segments={path} lastIsBlob={false} />
+          <Breadcrumb
+            repo={repo}
+            label={meta.displayName}
+            refName={refName}
+            segments={segments}
+            lastIsBlob={false}
+          />
         </>
       }
     >

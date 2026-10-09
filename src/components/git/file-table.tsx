@@ -22,7 +22,8 @@ export function FileTable({
   entries: TreeEntry[];
   basePath: string; // "" for root, "a/b" for subdir
 }) {
-  const qs = refName ? `?ref=${encodeURIComponent(refName)}` : "";
+  const enc = (s: string) => encodeURIComponent(s);
+  const base = basePath ? `${basePath}/` : "";
   return (
     <div className="border border-[#30363d] rounded-md overflow-hidden">
       <table className="w-full text-sm">
@@ -34,11 +35,7 @@ export function FileTable({
               </td>
               <td className="py-2 pr-4 align-middle min-w-0">
                 <Link
-                  href={
-                    e.type === "tree"
-                      ? `/${repo}/tree/${basePath ? basePath + "/" : ""}${e.name}${qs}`
-                      : `/${repo}/blob/${basePath ? basePath + "/" : ""}${e.name}${qs}`
-                  }
+                  href={`/${repo}/${e.type === "tree" ? "tree" : "blob"}/${enc(refName)}/${base}${enc(e.name)}`}
                   className="text-[#e6edf3] hover:text-[#4493f8] hover:underline break-all"
                 >
                   {e.name}

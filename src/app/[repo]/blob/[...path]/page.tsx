@@ -1,6 +1,7 @@
 import { notFound } from "next/navigation";
 import { Download, FileText, Images, ScrollText } from "lucide-react";
-import { getRepoMeta, isValidRef, pathType, readFileContent } from "@/lib/git";
+import { getRepoMeta, pathType, readFileContent } from "@/lib/git";
+import { resolveRefAndPath } from "@/lib/repo-path";
 import { formatBytes } from "@/lib/time";
 import { RepoHeader } from "@/components/git/repo-header";
 import { RepoShell } from "@/components/git/repo-shell";
@@ -20,30 +21,31 @@ function rawUrl(repo: string, ref: string, p: string, download: boolean) {
   )}&path=${encodeURIComponent(p)}${download ? "&download=1" : ""}`;
 }
 
+/**
+ * GitHub-style blob URL: /<repo>/blob/<ref>/<file…>
+ * The ref is resolved from the leading path segments (longest branch match,
+ * or a commit sha); the rest is the file path.
+ */
 export default async function BlobPage({
   params,
-  searchParams,
 }: {
   params: Promise<{ repo: string; path: string[] }>;
-  searchParams: Promise<{ ref?: string }>;
 }) {
   const { repo, path } = await params;
-  const { ref: refParam } = await searchParams;
   const meta = await getRepoMeta(repo);
   if (!meta) notFound();
 
-  const refName =
-    refParam && meta.branches.includes(refParam) && isValidRef(refParam)
-      ? refParam
-      : meta.defaultBranch;
-
-  const filePath = (path ?? []).join("/");
+  const { ref: refName, segments, dirPath: filePath } = resolveRefAndPath(
+    path ?? [],
+    meta.branches,
+    meta.defaultBranch
+  );
   if (!filePath) notFound();
 
   const type = await pathType(repo, refName, filePath);
   if (type === "tree") {
     const { redirect } = await import("next/navigation");
-    redirect(`/${repo}/tree/${filePath}?ref=${encodeURIComponent(refName)}`);
+    redirect(`/${repo}/tree/${[refName, ...segments].map(encodeURIComponent).join("/")}`);
   }
   if (type === null) notFound();
 
@@ -71,7 +73,7 @@ export default async function BlobPage({
             currentRef={refName}
             activeTab="code"
           />
-          <Breadcrumb repo={repo} label={meta.displayName} refName={refName} segments={path} lastIsBlob />
+          <Breadcrumb repo={repo} label={meta.displayName} refName={refName} segments={segments} lastIsBlob />
         </>
       }
     >

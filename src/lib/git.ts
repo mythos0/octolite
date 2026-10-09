@@ -8,6 +8,16 @@ import { randomBytes } from "crypto";
 import fs from "fs";
 import fsp from "fs/promises";
 import path from "path";
+import {
+  deleteRepoFromR2,
+  listR2Repos,
+  pullRepoFromR2,
+  pushRepoToR2,
+  r2Enabled,
+} from "./r2";
+
+// re-exports used by the git Smart HTTP route
+export { pushRepoToR2, r2Enabled } from "./r2";
 
 /**
  * Resolve the directory that stores bare repositories.
@@ -79,6 +89,17 @@ export function repoDir(name: string): string {
 
 export function repoExists(name: string): boolean {
   return fs.existsSync(path.join(repoDir(name), "HEAD"));
+}
+
+/**
+ * Make sure a repo is available on local disk, pulling it from R2 first
+ * when object storage is enabled (serverless cold start / another region).
+ */
+export async function ensureRepoLocal(name: string): Promise<boolean> {
+  if (repoExists(name)) return true;
+  if (!isValidRepoName(name)) return false;
+  if (r2Enabled()) await pullRepoFromR2(name, GIT_ROOT);
+  return repoExists(name);
 }
 
 /** Run a git command in a repo dir (async, streaming-friendly). */
@@ -168,6 +189,7 @@ export interface RepoMeta {
 }
 
 export async function listRepoNames(): Promise<string[]> {
+  if (r2Enabled()) return listR2Repos();
   if (!fs.existsSync(GIT_ROOT)) {
     try {
       await fsp.mkdir(GIT_ROOT, { recursive: true });
@@ -254,7 +276,7 @@ async function readDescription(dir: string): Promise<string> {
 }
 
 export async function getRepoMeta(name: string): Promise<RepoMeta | null> {
-  if (!repoExists(name)) return null;
+  if (!(await ensureRepoLocal(name))) return null;
   const dir = repoDir(name);
   const branches = await gitBranches(dir);
   const defaultBranch = await gitDefaultBranch(dir, branches);
@@ -382,6 +404,8 @@ export async function createRepo(
       commit.stdout.toString().trim(),
     ]);
   }
+  // persist to R2 when object storage is enabled (serverless-safe)
+  await pushRepoToR2(storedName, GIT_ROOT);
   return {
     ok: true,
     name: storedName,
@@ -405,6 +429,7 @@ export async function deleteRepo(name: string): Promise<boolean> {
   // Safety: make sure we only ever delete inside GIT_ROOT
   if (!dir.startsWith(GIT_ROOT)) return false;
   await fsp.rm(dir, { recursive: true, force: true });
+  await deleteRepoFromR2(name);
   return true;
 }
 
@@ -426,7 +451,7 @@ export async function listTree(
   ref: string,
   dirPath: string
 ): Promise<TreeEntry[] | null> {
-  if (!repoExists(repo) || !isValidRef(ref)) return null;
+  if (!(await ensureRepoLocal(repo)) || !isValidRef(ref)) return null;
   if (dirPath && !isValidRepoPath(dirPath)) return null;
   const dir = repoDir(repo);
   const spec = dirPath ? `${ref}:${dirPath}` : ref;
@@ -459,7 +484,7 @@ export async function pathType(
   ref: string,
   p: string
 ): Promise<"blob" | "tree" | null> {
-  if (!repoExists(repo) || !isValidRef(ref)) return null;
+  if (!(await ensureRepoLocal(repo)) || !isValidRef(ref)) return null;
   if (p && !isValidRepoPath(p)) return null;
   const spec = p ? `${ref}:${p}` : ref;
   const { code, stdout } = await runGit(["-C", repoDir(repo), "cat-file", "-t", spec]);
@@ -480,7 +505,7 @@ export async function readFileContent(
   ref: string,
   p: string
 ): Promise<FileContent | null> {
-  if (!repoExists(repo) || !isValidRef(ref) || !p || !isValidRepoPath(p)) return null;
+  if (!(await ensureRepoLocal(repo)) || !isValidRef(ref) || !p || !isValidRepoPath(p)) return null;
   const { code, stdout } = await runGit([
     "-C",
     repoDir(repo),
@@ -516,7 +541,7 @@ export async function listCommits(
   limit = 30,
   skip = 0
 ): Promise<CommitInfo[]> {
-  if (!repoExists(repo) || !isValidRef(ref)) return [];
+  if (!(await ensureRepoLocal(repo)) || !isValidRef(ref)) return [];
   const { code, stdout } = await runGit([
     "-C",
     repoDir(repo),
@@ -554,7 +579,7 @@ export async function getCommitDetail(
   repo: string,
   sha: string
 ): Promise<CommitDetail | null> {
-  if (!repoExists(repo)) return null;
+  if (!(await ensureRepoLocal(repo))) return null;
   if (!/^[a-fA-F0-9]{4,40}$/.test(sha)) return null;
   const dir = repoDir(repo);
   const meta = await runGit([
@@ -615,7 +640,7 @@ export interface BranchInfo {
 }
 
 export async function listBranches(repo: string): Promise<BranchInfo[] | null> {
-  if (!repoExists(repo)) return null;
+  if (!(await ensureRepoLocal(repo))) return null;
   const dir = repoDir(repo);
   const branches = await gitBranches(dir);
   const defaultBranch = await gitDefaultBranch(dir, branches);

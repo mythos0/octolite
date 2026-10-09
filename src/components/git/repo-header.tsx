@@ -81,6 +81,11 @@ export function RepoHeader(p: RepoHeaderProps) {
         <Select
           value={p.currentRef}
           onValueChange={(v) => {
+            if (p.activeTab === "code") {
+              // code views carry the ref in the URL path (GitHub-style)
+              router.push(`/${p.name}/tree/${encodeURIComponent(v)}`);
+              return;
+            }
             const sp = new URLSearchParams(searchParams.toString());
             if (v === p.defaultBranch) sp.delete("ref");
             else sp.set("ref", v);

@@ -15,7 +15,10 @@ import { NextRequest, NextResponse } from "next/server";
 import zlib from "zlib";
 import {
   ensureRepoForPush,
+  ensureRepoLocal,
+  GIT_ROOT,
   isValidRepoName,
+  pushRepoToR2,
   repoDir,
   repoExists,
   runGit,
@@ -23,6 +26,8 @@ import {
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
+/** git push/clone can take a while — stay under the platform cap. */
+export const maxDuration = 60;
 
 function pktLine(s: string): Buffer {
   const len = Buffer.byteLength(s) + 4;
@@ -54,7 +59,7 @@ async function handleGet(req: NextRequest, nameWithGit: string) {
     });
   }
 
-  if (!repoExists(repo)) {
+  if (!(await ensureRepoLocal(repo))) {
     if (service === "git-receive-pack") {
       // push-to-create
       const ok = await ensureRepoForPush(repo);
@@ -92,7 +97,7 @@ async function handlePost(req: NextRequest, nameWithGit: string, svc: string) {
     return new NextResponse("unsupported service", { status: 400 });
   }
 
-  if (!repoExists(repo)) {
+  if (!(await ensureRepoLocal(repo))) {
     if (svc === "git-receive-pack") {
       const ok = await ensureRepoForPush(repo);
       if (!ok) return notFound("invalid repository name");
@@ -116,6 +121,11 @@ async function handlePost(req: NextRequest, nameWithGit: string, svc: string) {
   });
   if (res.code !== 0 && res.stdout.length === 0) {
     return new NextResponse(`git ${svc} failed: ${res.stderr}`, { status: 500 });
+  }
+
+  if (svc === "git-receive-pack" && res.code === 0) {
+    // persist the updated repo to R2 (no-op in local-disk mode)
+    await pushRepoToR2(repo, GIT_ROOT);
   }
 
   return new NextResponse(new Uint8Array(res.stdout), {
